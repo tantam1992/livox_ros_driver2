@@ -33,12 +33,12 @@
 	      output="screen" args="$(arg cmdline_arg)"/>
 
 	<node pkg="tf" type="static_transform_publisher" name="base_to_livox_lidar"
-			args="0.285 0.0 0.805 0.0 0.558505361 0.0 /base_link /livox_frame 50" />
+			args="0.19195 0.0 0.80596 0.0 0.558505361 0.0 /base_link /livox_frame 50" />
 
-	<group if="$(arg rviz_enable)">
+	<!-- <group if="$(arg rviz_enable)">
 		<node name="livox_rviz" pkg="rviz" type="rviz" respawn="true"
 				args="-d $(find livox_ros_driver2)/config/display_point_cloud_ROS1.rviz"/>
-    </group>
+    </group> -->
 
 	<group if="$(arg rosbag_enable)">
     	<node pkg="rosbag" type="record" name="record" output="screen"
