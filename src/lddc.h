@@ -92,7 +92,8 @@ class Lddc final {
 
   // void SetRosPub(ros::Publisher *pub) { global_pub_ = pub; };  // NOT USED
   void SetPublishFrq(uint32_t frq) { publish_frq_ = frq; }
-
+  void SetBlind(double blind){ blind_ = blind; }
+  
  public:
   Lds *lds_;
 
@@ -108,15 +109,15 @@ class Lddc final {
 
   void InitPointcloud2MsgHeader(PointCloud2& cloud);
   void InitPointcloud2Msg(const StoragePacket& pkg, PointCloud2& cloud, uint64_t& timestamp);
-  void PublishPointcloud2Data(const uint8_t index, uint64_t timestamp, const PointCloud2& cloud);
+  void PublishPointcloud2Data(const uint8_t index, uint64_t timestamp, PointCloud2& cloud);
 
   void InitCustomMsg(CustomMsg& livox_msg, const StoragePacket& pkg, uint8_t index);
   void FillPointsToCustomMsg(CustomMsg& livox_msg, const StoragePacket& pkg);
-  void PublishCustomPointData(const CustomMsg& livox_msg, const uint8_t index);
+  void PublishCustomPointData(CustomMsg& livox_msg, const uint8_t index);
 
   void InitPclMsg(const StoragePacket& pkg, PointCloud& cloud, uint64_t& timestamp);
   void FillPointsToPclMsg(const StoragePacket& pkg, PointCloud& pcl_msg);
-  void PublishPclData(const uint8_t index, const uint64_t timestamp, const PointCloud& cloud);
+  void PublishPclData(const uint8_t index, const uint64_t timestamp, PointCloud& cloud);
 
   void InitImuMsg(const ImuData& imu_data, ImuMsg& imu_msg, uint64_t& timestamp);
 
@@ -130,7 +131,9 @@ class Lddc final {
 
   PublisherPtr GetCurrentPublisher(uint8_t index);
   PublisherPtr GetCurrentImuPublisher(uint8_t index);
-
+  PublisherPtr GetPointCloud2Publisher(uint8_t index);
+  PublisherPtr GetPclPublisher(uint8_t index);
+  
  private:
   uint8_t transfer_format_;
   uint8_t use_multi_topic_;
@@ -139,6 +142,7 @@ class Lddc final {
   double publish_frq_;
   uint32_t publish_period_ns_;
   std::string frame_id_;
+  double blind_{0.0};
 
 #ifdef BUILDING_ROS1
   bool enable_lidar_bag_;

@@ -223,10 +223,27 @@ void Lddc::PublishCustomPointcloud(LidarDataQueue *queue, uint8_t index) {
       continue;
     }
 
+    int point_size_used=0;
+    for (size_t i = 0; i < pkg.points.size(); i++)
+    {
+      auto &point = pkg.points[i];
+      if(point.x * point.x + point.y * point.y + point.z * point.z >= blind_)
+      {
+        point_size_used++;
+      }
+    }
+    pkg.points_num = point_size_used;
+    
     CustomMsg livox_msg;
     InitCustomMsg(livox_msg, pkg, index);
     FillPointsToCustomMsg(livox_msg, pkg);
     PublishCustomPointData(livox_msg, index);
+
+    PointCloud cloud;
+    uint64_t timestamp = 0;
+    InitPclMsg(pkg, cloud, timestamp);
+    FillPointsToPclMsg(pkg, cloud);
+    PublishPclData(index, timestamp, cloud);
   }
 }
 
@@ -332,7 +349,11 @@ void Lddc::InitPointcloud2Msg(const StoragePacket& pkg, PointCloud2& cloud, uint
   memcpy(cloud.data.data(), points.data(), pkg.points_num * sizeof(LivoxPointXyzrtlt));
 }
 
-void Lddc::PublishPointcloud2Data(const uint8_t index, const uint64_t timestamp, const PointCloud2& cloud) {
+void Lddc::PublishPointcloud2Data(const uint8_t index, const uint64_t timestamp, PointCloud2& cloud) {
+  std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
+  ip_string = ReplacePeriodByUnderline(ip_string);
+  cloud.header.frame_id = "livox_frame_" + ip_string;
+  
 #ifdef BUILDING_ROS1
   PublisherPtr publisher_ptr = Lddc::GetCurrentPublisher(index);
 #elif defined BUILDING_ROS2
@@ -382,9 +403,8 @@ void Lddc::InitCustomMsg(CustomMsg& livox_msg, const StoragePacket& pkg, uint8_t
 }
 
 void Lddc::FillPointsToCustomMsg(CustomMsg& livox_msg, const StoragePacket& pkg) {
-  uint32_t points_num = pkg.points_num;
   const std::vector<PointXyzlt>& points = pkg.points;
-  for (uint32_t i = 0; i < points_num; ++i) {
+  for (uint32_t i = 0; i < pkg.points.size(); ++i) {
     CustomPoint point;
     point.x = points[i].x;
     point.y = points[i].y;
@@ -393,12 +413,17 @@ void Lddc::FillPointsToCustomMsg(CustomMsg& livox_msg, const StoragePacket& pkg)
     point.tag = points[i].tag;
     point.line = points[i].line;
     point.offset_time = static_cast<uint32_t>(points[i].offset_time - pkg.base_time);
-
-    livox_msg.points.push_back(std::move(point));
+    if(point.x * point.x + point.y * point.y + point.z * point.z >= blind_)
+    {
+      livox_msg.points.push_back(std::move(point));
+    }
   }
 }
 
-void Lddc::PublishCustomPointData(const CustomMsg& livox_msg, const uint8_t index) {
+void Lddc::PublishCustomPointData(CustomMsg& livox_msg, const uint8_t index) {
+  std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
+  ip_string = ReplacePeriodByUnderline(ip_string);
+  livox_msg.header.frame_id = "livox_frame_" + ip_string;
 #ifdef BUILDING_ROS1
   PublisherPtr publisher_ptr = Lddc::GetCurrentPublisher(index);
 #elif defined BUILDING_ROS2
@@ -440,16 +465,17 @@ void Lddc::FillPointsToPclMsg(const StoragePacket& pkg, PointCloud& pcl_msg) {
     return;
   }
 
-  uint32_t points_num = pkg.points_num;
   const std::vector<PointXyzlt>& points = pkg.points;
-  for (uint32_t i = 0; i < points_num; ++i) {
+  for (uint32_t i = 0; i < pkg.points.size(); ++i) {
     pcl::PointXYZI point;
     point.x = points[i].x;
     point.y = points[i].y;
     point.z = points[i].z;
     point.intensity = points[i].intensity;
-
-    pcl_msg.points.push_back(std::move(point));
+    if(point.x * point.x + point.y * point.y + point.z * point.z >= blind_)
+    {
+      pcl_msg.points.push_back(std::move(point));
+    }
   }
 #elif defined BUILDING_ROS2
   std::cout << "warning: pcl::PointCloud is not supported in ROS2, "
@@ -459,9 +485,12 @@ void Lddc::FillPointsToPclMsg(const StoragePacket& pkg, PointCloud& pcl_msg) {
   return;
 }
 
-void Lddc::PublishPclData(const uint8_t index, const uint64_t timestamp, const PointCloud& cloud) {
+void Lddc::PublishPclData(const uint8_t index, const uint64_t timestamp, PointCloud& cloud) {
+  std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
+  ip_string = ReplacePeriodByUnderline(ip_string);
+  cloud.header.frame_id = "livox_frame_" + ip_string;
 #ifdef BUILDING_ROS1
-  PublisherPtr publisher_ptr = Lddc::GetCurrentPublisher(index);
+  PublisherPtr publisher_ptr = Lddc::GetPclPublisher(index);
   if (kOutputToRos == output_type_) {
     publisher_ptr->publish(cloud);
   } else {
@@ -689,6 +718,79 @@ std::shared_ptr<rclcpp::PublisherBase> Lddc::GetCurrentImuPublisher(uint8_t hand
   }
 }
 #endif
+
+PublisherPtr Lddc::GetPointCloud2Publisher(uint8_t index) {
+  ros::Publisher **pub = nullptr;
+  uint32_t queue_size = kMinEthPacketQueueSize;
+
+  if (use_multi_topic_) {
+    pub = &private_pub_[index+2];
+    queue_size = queue_size / 8; // queue size is 4 for only one lidar
+  } else {
+    pub = &global_pub_;
+    queue_size = queue_size * 8; // shared queue size is 256, for all lidars
+  }
+
+  if (*pub == nullptr) {
+    char name_str[48];
+    memset(name_str, 0, sizeof(name_str));
+    if (use_multi_topic_) {
+      std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
+      snprintf(name_str, sizeof(name_str), "livox/pointcloud/lidar_%s",
+               ReplacePeriodByUnderline(ip_string).c_str());
+      DRIVER_INFO(*cur_node_, "Support multi topics.");
+    } else {
+      DRIVER_INFO(*cur_node_, "Support only one topic.");
+      snprintf(name_str, sizeof(name_str), "livox/pointcloud/lidar");
+    }
+
+    *pub = new ros::Publisher;
+    **pub =
+          cur_node_->GetNode().advertise<sensor_msgs::PointCloud2>(name_str, queue_size);
+      DRIVER_INFO(*cur_node_,
+          "%s publish use PointCloud2 format, set ROS publisher queue size %d",
+          name_str, queue_size);
+  }
+
+  return *pub;
+}
+
+PublisherPtr Lddc::GetPclPublisher(uint8_t index)
+{
+  ros::Publisher **pub = nullptr;
+  uint32_t queue_size = kMinEthPacketQueueSize;
+
+  if (use_multi_topic_) {
+    pub = &private_pub_[index+2];
+    queue_size = queue_size / 8; // queue size is 4 for only one lidar
+  } else {
+    pub = &global_pub_;
+    queue_size = queue_size * 8; // shared queue size is 256, for all lidars
+  }
+
+  if (*pub == nullptr) {
+    char name_str[48];
+    memset(name_str, 0, sizeof(name_str));
+    if (use_multi_topic_) {
+      std::string ip_string = IpNumToString(lds_->lidars_[index].handle);
+      snprintf(name_str, sizeof(name_str), "livox/pcl/lidar_%s",
+               ReplacePeriodByUnderline(ip_string).c_str());
+      DRIVER_INFO(*cur_node_, "Support multi topics.");
+    } else {
+      DRIVER_INFO(*cur_node_, "Support only one topic.");
+      snprintf(name_str, sizeof(name_str), "livox/pcl/lidar");
+    }
+
+    *pub = new ros::Publisher;
+    **pub = cur_node_->GetNode().advertise<PointCloud>(name_str, queue_size);
+      DRIVER_INFO(*cur_node_,
+          "%s publish use pcl PointXYZI format, set ROS publisher queue "
+          "size %d",
+          name_str, queue_size);
+  }
+
+  return *pub;
+}
 
 void Lddc::CreateBagFile(const std::string &file_name) {
 #ifdef BUILDING_ROS1
