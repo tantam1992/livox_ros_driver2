@@ -37,7 +37,9 @@
 	<node pkg="tf" type="static_transform_publisher" name="base_to_livox_lidar_front"
 			args="0.19195 0.0 0.80596 0.0 0.558505361 0.0 /base_link /livox_frame_192_168_1_103 50" />
 	<node pkg="tf" type="static_transform_publisher" name="base_to_livox_lidar_back"
-			args="-0.98147 0.0 0.011 3.14 0.0 0.0 /base_link /livox_frame_192_168_1_104 50" />
+			args="-0.98197 0.0 0.005 3.14 -0.10472 3.14 /base_link /livox_frame_192_168_1_104 50" />
+			<!-- args="-0.98197 0.0 0.055 3.14 0.0 0.0 /base_link /livox_frame_192_168_1_104 50"  -->
+			<!-- args="-0.98197 0.0 0.035 3.14 0.10472 3.14 /base_link /livox_frame_192_168_1_104 50" -->
 
 	<!-- <group if="$(arg rviz_enable)">
 		<node name="livox_rviz" pkg="rviz" type="rviz" respawn="true"
